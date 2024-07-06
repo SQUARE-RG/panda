@@ -7,7 +7,7 @@ for pipelining compiler-based tools in parallel
 based on the [JSON compilation database][link-cdb].
 It allows you to execute various tools
 on translation units by replaying the compilation process.
-An introduction video to this tool is available from <https://youtu.be/dLG2tEzuaCw>.
+An introduction video to this tool is available from <https://youtu.be/YQTg5LsId5k>.
 
 The advantage of *Panda* include:
 
@@ -26,8 +26,8 @@ $ curl -fsSL https://github.com/Snape3058/panda/raw/demo/panda | sudo tee /usr/b
 $ sudo chmod +x /usr/bin/panda
 ```
 
-GitHub Repo for ICSE 2024 tool demo revision: <https://github.com/Snape3058/panda/tree/demo>.
-Please note that the content on the `demo` branch is ahead of the main branch.
+Please note that the content on the `demo` branch is ahead of the main branch,
+and only the code on this branch is for demonstration track revision.
 And the functionalities on this branch will be merged to the main branch
 after this tool paper gets accepted.
 
@@ -50,8 +50,8 @@ $ panda <configurations> [-f CDB] [-j JOBS] [-o OUTPUT] [options]
 *Panda* provides built-in configurations that cover most scenes
 of executing analyzers and generating desired inputs for analyzers.
 The built-in configurations can be categorized as
-Compiler Tool (T<sub>Compiler</sub>) Configurations,
-Frontend Tool (T<sub>Frontend</sub>) Configurations,
+Integrated Tool Configurations,
+Singleton Tool Configurations,
 and Compilation Database Configurations.
 The first two categories have been mentioned in the paper,
 and the last category of configurations are used to
@@ -76,7 +76,7 @@ $ panda --plugin /tmp/check/plugin.json -o /tmp/check
 The compilation database configurations
 transform the input compilation database
 to generate the output file,
-or summarize the output of other T<sub>Frontend</sub> configurations.
+or summarize the output of other builtin configurations for Singleton tools.
 
 * Generate *input file list* (`-L` or `--gen-input-file-list`):
     a list of all unique `file`s with absolute path.
@@ -92,9 +92,9 @@ or summarize the output of other T<sub>Frontend</sub> configurations.
     for Cross Translation Unit Analysis of the *Clang Static Analyzer*
     under [AST-loading][link-al] strategy.
 
-### Built-in Compiler Tool Configurations
+### Built-in Integrated Tool Configurations
 
-The T<sub>Compiler</sub> Configurations
+The Configurations for integrated tools
 mainly generate inputs in desired formats for different analyzers.
 
 * Test command line arguments and source file syntax (`-X` or `--syntax`):
@@ -115,68 +115,65 @@ mainly generate inputs in desired formats for different analyzers.
     invoke compiler with `-M`
 * Execute Clang Static Analyzer without Cross Translation Unit Analysis (`--analysis`)
 
-### Built-in Frontend Tool Configurations
+### Built-in Singleton Tool Configurations
 
-The T<sub>Frontend</sub> configurations mainly invoke Clang Tooling based tools.
+The builtin configurations for Singleton tools mainly invoke Clang Tooling based tools.
 
 * Generating external function map (as mentioned above)
 
 ### Plugins
 
-Users can execute customized T<sub>Compiler</sub> and T<sub>Frontend</sub> tools
+Users can execute customized Integrated and Singleton tools
 with plugins defined with a CBT execution configuration in JSON format.
 In the description,
 field `comment` is a string for commenting the description,
 field `type` determines the type of the configuration,
 and object `action` defines the CBT Execution Configuration object.
 
-* Example T<sub>Compiler</sub> configuration (Figure 4a)
-  of generating dependency files (option `-D` or `--gen-dep`).
+* Example configuration (Figure 4a) of generating LLVM-IR code dumps.
 
 ```json
 {
-    "comment": "Example plugin for Panda driver.",
-    "type": "Compiler",
+    "comment": "Example plugin for Panda scheduler.",
+    "type": "Integrated",
     "action": {
-        "prompt": "Generating dependency file",
+        "prompt": "Generating LLVM-IR code",
         "tool": {
             "c": "clang",
             "c++": "clang++"
         },
-        "args": ["-fsyntax-only", "-w", "-M"],
-        "extension": ".d",
-        "outopt": "-MF"
+        "args": ["-c", "-emit-llvm", "-S"],
+        "extension": ".ll"
     }
 }
 ```
 
-For a T<sub>Compiler</sub> configuration, object `action` has four fields.
+For a configuration for Integrated tools, object `action` has four fields.
 Field `prompt` defines the prompt string printed during executing the tool.
 Field `args` is a list of command line arguments to be added during execution.
 Field `extension` determines the extension name of the output file.
-And field `outopt` represents the option of generating the output.
 
-* Example T<sub>Frontend</sub> configuration (Figure 4b) of executing Clang Tidy
-    with a configuration file `config.txt` in output directory
-    and storing command line output of stderr stream to output file.
+* Example configuration (Figure 4b) of executing Clang Query
+  to identify all `goto` statements,
+  and storing command line output of stdout stream to output file.
 
 ```json
 {
-    "comment": "Example plugin for Panda driver",
-    "type": "Frontend",
+    "comment": "Example plugin for Panda scheduler",
+    "type": "Singleton",
     "action": {
-        "prompt": "Generating raw external function map",
-        "tool": "clang-tidy",
-        "args": ["--config-file=/path/to/output/config.txt"],
-        "extension": ".clang-tidy",
-        "source": "stderr"
+        "prompt": "Match 'goto' statement",
+        "tool": "clang-query",
+        "args": ["-c", "match gotoStmt()"],
+        "extension": ".clang-query",
+        "source": "stdout"
     }
 }
 ```
 
-For a T<sub>Frontend</sub> configuration, object `action` has five fields.
+For a configuration for Singleton tools, object `action` has five fields.
 Field `prompt`, `args`, and `extension` have the same meaning as
-a T<sub>Compiler</sub> configuration.
+a configuration for Integrated tools.
 Field `tool` determines the tool to be executed.
 And field `source` represents
 the output of which stream will be stored to the output file.

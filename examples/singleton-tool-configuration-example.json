@@ -1,0 +1,11 @@
+{
+    "comment": "Example plugin for Panda scheduler",
+    "type": "Singleton",
+    "action": {
+        "prompt": "Match 'for' statement",
+        "tool": "clang-query",
+        "args": ["-c", "match forStmt()"],
+        "extension": ".clang-query",
+        "source": "stdout"
+    }
+}

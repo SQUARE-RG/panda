@@ -437,11 +437,11 @@ def ParsePlugins(plugins):
             plugobj = json.load(open(p))
             actionTy = GetIndex(plugobj, 'type')
             action = GetIndex(plugobj, 'action')
-            if actionTy == 'Compiler':
+            if actionTy == 'Integrated':
                 ret.append((CompilerAction,
                     CompilerActionControl.CreateFromPluginAction(action)))
                 continue
-            if actionTy == 'Frontend':
+            if actionTy == 'Singleton':
                 ret.append((ClangToolAction,
                     ClangToolActionControl.CreateFromPluginAction(action)))
                 continue

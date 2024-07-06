@@ -1,0 +1,13 @@
+{
+    "comment": "Example plugin for Panda scheduler.",
+    "type": "Integrated",
+    "action": {
+        "prompt": "Generating LLVM-IR code",
+        "tool": {
+            "c": "clang",
+            "c++": "clang++"
+        },
+        "args": ["-c", "-emit-llvm", "-S"],
+        "extension": ".ll"
+    }
+}
