@@ -206,6 +206,10 @@ class WorklistOrder:
 # - Decending order of size: the larger the less
 class LongestJobFirstWorklistOrder(WorklistOrder):
     def itemlt(self, other):
+        # assume None it is the largest.
+        if self.size is None: return True
+        elif other.size is None: return False
+        
         return self.size > other.size
 
 # Shortest job first order:
@@ -213,6 +217,10 @@ class LongestJobFirstWorklistOrder(WorklistOrder):
 # - Decending order of size: the less the less
 class ShortestJobFirstWorklistOrder(WorklistOrder):
     def itemlt(self, other):
+        # assume None it is the largest.
+        if self.size is None: return False
+        elif other.size is None: return True
+        
         return self.size < other.size
 
 
@@ -241,28 +249,6 @@ class SortedWorklist(PriorityQueue):
         except Exception as e:
             traceback.print_exc()
 
-class LogManager:
-    def __init__(self, output):
-        self.output = output
-        self.hintlist = mp.Manager().list()
-
-    def hint(self, item, duration):
-        duration *= 1000
-        self.hintlist.append((item, duration))
-
-    def dump(self):
-        if not self.output: return
-        with open(os.path.join(self.output, 'predictions.log'), 'w') as f:
-            f.write('<file> <size> <execution>\n')
-            for item, duration in list(self.hintlist):
-                opts, cdb, action = \
-                        (lambda o, c, a=None: (o, c, a))(*item.getArgs())
-                # Ignore cdb jobs.
-                if not action: continue
-                size = item.size if hasattr(item, 'size') else 0
-                f.write('%s %lf %lf\n' % (cdb.file, size, duration))
-
-
 # NOTE: THINK AGAIN BEFORE MODIFYING THE IMPLEMENTATION OF STOPPING.
 class TaskPool:
     def __init__(self, opts):
@@ -270,12 +256,9 @@ class TaskPool:
         logdirformat = '-'.join([
             'logs', opts.scheduler, opts.filesize, '%y%m%d%H%M%S'])
         stamp = time.strftime(logdirformat, time.localtime())
-        self.output = os.path.join(opts.output, stamp)
-        mkdir(self.output)
         self.procs = []
         self.tasks = mp.Manager().SelectedWorkList()
         self.taskarrive = []
-        self.logManager = LogManager(self.output)
         for i in range(opts.jobs):
             proc = mp.Process(target=self._run_task)
             proc.daemon = True
@@ -293,10 +276,6 @@ class TaskPool:
         for i in self.procs:
             i.join()
             log('Task process %d joins.' % i.pid)
-        if self.output:
-            with open(os.path.join(self.output, 'task-arrive.log'), 'w') as f:
-                for i in self.taskarrive:
-                    f.write('%lf\n' % i)
 
     def _run_task(self):
         durations = [(0.0, time.time())]
@@ -307,14 +286,7 @@ class TaskPool:
                 break
             end = time.time()
             durations.append((begin, end))
-            self.logManager.hint(job, end - begin)
         durations.append((time.time(), 0.0))
-        if self.output:
-            name = 'taskprocess-%d.log' % os.getpid()
-            with open(os.path.join(self.output, name), 'w') as f:
-                for i in durations:
-                    f.write('%lf %lf\n' % (i[0], i[1]))
-
 
 def GetIndex(container, index, root='<root>'):
     if index not in container:
@@ -378,6 +350,8 @@ class CompilerActionControl:
 
     def getOutputName(self, outdir, ccdb):
         assert os.path.isabs(ccdb.file), "'file' in cdb unit is not abspath"
+        if os.path.exists(ccdb.file):
+            return ccdb.file + self.getOutputExtensionName(ccdb.language)
         return outdir + ccdb.file + self.getOutputExtensionName(ccdb.language)
 
     def getCompiler(self, ccdb):
@@ -426,6 +400,8 @@ class ClangToolActionControl:
 
     def getOutputName(self, outdir, ccdb):
         assert os.path.isabs(ccdb.file), "'file' in cdb unit is not abspath"
+        if os.path.exists(ccdb.file):
+            return ccdb.file + self.extname
         return outdir + ccdb.file + self.extname
 
 
@@ -743,6 +719,11 @@ def GenerateFinalExternalFunctionMap(opts, cdb):
     output = os.path.join(opts.output, opts.efm)
     print('Generating global external function map: ' + output)
     efm = {}
+    # print('*' * 80)
+    # print([ClangExtDefMappingAction.getOutputName(opts.output, i) for i in cdb])
+    # print('*' * 80)
+    # exit(0)
+
     with mp.Pool(opts.jobs) as p:
         for efmcontent in p.map(getExtDefMap,
                 [ClangExtDefMappingAction.getOutputName(opts.output, i) \
@@ -919,13 +900,13 @@ def main(argv):
     PrintExcutionInfo.start_time = time.time()
     pool = TaskPool(opts)
     action = CreateCompilationDatabaseObjectAction(opts, pool)
+    # cdb: compilation database.
     with open(opts.cdb) as fcdb:
         cdb = json.load(fcdb, object_hook=action)
     AddCompilationDatabaseActions(opts, pool, cdb)
     pool.join()
     ExecuteFullCompilationDatabaseAction(opts, cdb)
     PrintExcutionInfo()
-    pool.logManager.dump()
 
 
 if __name__ == '__main__':
