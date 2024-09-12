@@ -5,6 +5,7 @@
 #  See Copyright Notice in file `LICENSE.txt`.  #
 #################################################
 
+import traceback
 import os
 import sys
 import json
@@ -12,7 +13,8 @@ import argparse
 import multiprocessing as mp
 import subprocess as proc
 import time
-import atexit
+from queue import Queue
+from queue import PriorityQueue
 
 
 # Utils {{{
@@ -29,12 +31,8 @@ def warn(msg): print('-- ' + msg, file=sys.stderr)
 
 
 def PrintExcutionInfo():
-    if PrintExcutionInfo.print_time:
-        print('Total execution time: %.3lf sec' %
-                (time.time() - PrintExcutionInfo.start_time))
-atexit.register(PrintExcutionInfo)
-PrintExcutionInfo.start_time = time.time()
-PrintExcutionInfo.print_time = False
+    print('Total execution time: %.3lf sec' %
+            (time.time() - PrintExcutionInfo.start_time))
 
 
 def mkdir(dirname):
@@ -44,6 +42,22 @@ def mkdir(dirname):
             os.makedirs(dirname)
         except FileExistsError:  # may happen when multi-thread
             pass
+
+
+# File type: clang::driver::types::lookupTypeForExtension
+def InferLanguage(path):
+    extname = os.path.splitext(path)[1][1:]
+    if extname == 'c':
+        return 'c'
+    elif extname in {'C', 'cc', 'CC', 'cp', 'cpp', 'CPP',
+            'cxx', 'CXX', 'c++', 'C++'}:
+        return 'c++'
+#   elif extname == 'i':
+#       return 'PP-C'
+#   elif extname == 'ii':
+#       return 'PP-C++'
+    else:
+        return 'Unknown'
 
 
 class CompileCommands:
@@ -78,19 +92,7 @@ class CompileCommands:
         self.file = os.path.abspath(os.path.join(
             self.directory, ccmd['file']))
 
-        # File type: clang::driver::types::lookupTypeForExtension
-        extname = os.path.splitext(self.file)[1][1:]
-        if extname == 'c':
-            self.language = 'c'
-        elif extname in {'C', 'cc', 'CC', 'cp', 'cpp', 'CPP',
-                'cxx', 'CXX', 'c++', 'C++'}:
-            self.language = 'c++'
-#       elif extname == 'i':
-#           self.language = 'PP-C'
-#       elif extname == 'ii':
-#           self.language = 'PP-C++'
-        else:
-            self.language = 'Unknown'
+        self.language = InferLanguage(self.file)
 
         # command => arguments
         arguments = None
@@ -138,34 +140,153 @@ class CompileCommands:
                 ('arguments' in ccmd or 'command' in ccmd)
 
 
+# Measure job size according to task arguments
+# Sub-classes should reset self._compute for onerous size computation.
+class JobSize:
+    def get(self, opts, cdb, action=None):
+        if action is None:
+            return None
+        return self._compute(opts, cdb, action)
+
+class LinesOfCodeAsJobSize(JobSize):
+    def _compute(self, opts, cdb, action):
+        return open(cdb.file).read().count('\n')
+
+class SemicolonAsJobSize(JobSize):
+    def _compute(self, opts, cdb, action):
+        return open(cdb.file).read().count(';')
+
+class CommaAsJobSize(JobSize):
+    def _compute(self, opts, cdb, action):
+        return open(cdb.file).read().count(',')
+
+
+class WorklistItem:
+    def __init__(self, func, *args):
+        self.func = func
+        self.args = args
+
+    def run(self):
+        self.func(*self.args)
+        return True
+
+    # Used by FIFO strategy, as it will not wrap item with order.
+    def getArgs(self): return self.args
+
+class WorklistStop:
+    def run(self): return False
+
+
+# Wrapping a worklist item or stop, determining their order according to the
+# sorting strategy.
+# Override itemlt to override the sorting strategy.
+# DO NOT override __lt__ as it determines the order of stop and items.
+#
+# Worklist order:
+# - STOP is always the largest element
+# - sized order is determined by sub-classes comparison
+class WorklistOrder:
+    def __init__(self, item): self.item = item
+
+    # Proxies of WorklistItem methods.
+    def getArgs(self): return self.item.args
+    def run(self): return self.item.run()
+
+    def isStop(self): return type(self.item) is WorklistStop
+
+    def __lt__(self, other):
+        # STOPs are always the largest.
+        if self.isStop(): return False
+        if other.isStop(): return True
+        # if both are sized, order by size.
+        return self.itemlt(other)
+
+# Longest job first order:
+# - CDB tasks to front: the least
+# - Decending order of size: the larger the less
+class LongestJobFirstWorklistOrder(WorklistOrder):
+    def itemlt(self, other):
+        # assume None it is the largest.
+        if self.size is None: return True
+        elif other.size is None: return False
+        
+        return self.size > other.size
+
+# Shortest job first order:
+# - CDB tasks to back: the largest
+# - Decending order of size: the less the less
+class ShortestJobFirstWorklistOrder(WorklistOrder):
+    def itemlt(self, other):
+        # assume None it is the largest.
+        if self.size is None: return False
+        elif other.size is None: return True
+        
+        return self.size < other.size
+
+
+# Add interfaces of SortedWorklist to Queue.
+class NormalQueue(Queue): pass
+
+class SortedWorklist(PriorityQueue):
+    jobsize = None
+    order = None
+
+    def _put(self, item):
+        # Wrap WorklistItem with WorklistOrder.
+        item = self.order(item)
+        if item.isStop():
+            # STOP is always the largest item, append directly will not break
+            # the heap constraints.
+            self.queue.append(item)
+            return
+
+        # Determine job size prediction.
+        item.size = self.jobsize.get(*item.getArgs())
+
+        # Put item into heap.
+        try:
+            super()._put(item)
+        except Exception as e:
+            traceback.print_exc()
+
+# NOTE: THINK AGAIN BEFORE MODIFYING THE IMPLEMENTATION OF STOPPING.
 class TaskPool:
-    def __init__(self, count=0):
-        assert count > 0, 'Invalid pool size.'
+    def __init__(self, opts):
+        assert opts.jobs > 0, 'Invalid pool size.'
+        logdirformat = '-'.join([
+            'logs', opts.scheduler, opts.filesize, '%y%m%d%H%M%S'])
+        stamp = time.strftime(logdirformat, time.localtime())
         self.procs = []
-        self.stop = 0x42424242
-        self.tasks = mp.Queue()
-        for i in range(count):
+        self.tasks = mp.Manager().SelectedWorkList()
+        self.taskarrive = []
+        for i in range(opts.jobs):
             proc = mp.Process(target=self._run_task)
             proc.daemon = True
             proc.start()
+            log('Task process %d starts.' % proc.pid)
             self.procs.append(proc)
 
     def addTask(self, *args):
-        self.tasks.put(args)
+        self.tasks.put(WorklistItem(*args))
+        self.taskarrive.append(time.time())
 
     def join(self):
         for i in self.procs:
-            self.tasks.put(self.stop)
+            self.tasks.put(WorklistStop())
         for i in self.procs:
             i.join()
+            log('Task process %d joins.' % i.pid)
 
     def _run_task(self):
+        durations = [(0.0, time.time())]
         while True:
-            args = self.tasks.get()
-            if args == self.stop:
+            job = self.tasks.get()
+            begin = time.time()
+            if not job.run():
                 break
-            (lambda action, *args: action(*args))(*args)
-
+            end = time.time()
+            durations.append((begin, end))
+        durations.append((time.time(), 0.0))
 
 def GetIndex(container, index, root='<root>'):
     if index not in container:
@@ -178,9 +299,13 @@ def GetIndexOrNone(container, index):
 
 
 class CompilerActionControl:
-    def __init__(self, title, args, extname=None, outopt=None):
-        self.title = title
+    def __init__(self, prompt, args, extname=None, outopt=None, compiler=None):
+        self.prompt = prompt
         self.args = args
+        self.compiler = compiler
+        if self.compiler:
+            assert 'c' in self.compiler and 'c++' in self.compiler, \
+                    'Index "compiler" needs to be language separated map'
         if extname:
             self.hasOutput = True
             self.extname = extname
@@ -191,12 +316,26 @@ class CompilerActionControl:
         else:
             self.hasOutput = False
 
+    def summarize(self):
+        ret = 'compiler: ' + str(self.args)
+        if self.hasOutput:
+            ret += ', ' + str(self.outopt)
+        if self.compiler:
+            ret += ', ' + str(self.compiler)
+        return ret
+
+    def __hash__(self):
+        return hash(self.summarize())
+
     def CreateFromPluginAction(action):
-        title = GetIndex(action, 'title', 'action')
+        prompt = GetIndex(action, 'prompt', 'action')
         args = GetIndex(action, 'args', 'action')
-        extname = GetIndexOrNone(action, 'extname')
+        extname = GetIndexOrNone(action, 'extension')
         outopt = GetIndexOrNone(action, 'outopt')
-        return CompilerActionControl(title, args, extname, outopt)
+        compiler = GetIndexOrNone(action, 'tool')
+        if isinstance(compiler, str):
+            compiler = {'c': compiler, 'c++': compiler}
+        return CompilerActionControl(prompt, args, extname, outopt, compiler)
 
     def getOutputExtensionName(self, language):
         if not self.hasOutput:
@@ -211,13 +350,20 @@ class CompilerActionControl:
 
     def getOutputName(self, outdir, ccdb):
         assert os.path.isabs(ccdb.file), "'file' in cdb unit is not abspath"
+        if os.path.exists(ccdb.file):
+            return ccdb.file + self.getOutputExtensionName(ccdb.language)
         return outdir + ccdb.file + self.getOutputExtensionName(ccdb.language)
+
+    def getCompiler(self, ccdb):
+        if self.compiler:
+            return self.compiler[ccdb.language]
+        return ccdb.language
 
 
 class ClangToolActionControl:
-    def __init__(self, title, tool, args, extname=None, stdout=None,
+    def __init__(self, prompt, tool, args, extname=None, stdout=None,
             stderr=None):
-        self.title = title
+        self.prompt = prompt
         self.tool = tool
         self.args = args
         self.extname = extname
@@ -229,14 +375,20 @@ class ClangToolActionControl:
             assert self.stdout or self.stderr, \
                     'Capture output from either stdout or stderr'
 
+    def summarize(self):
+        return 'tooling: ' + self.tool + ', ' + str(self.args)
+
+    def __hash__(self):
+        return hash(self.summarize())
+
     def CreateFromPluginAction(action):
-        title = GetIndex(action, 'title', 'action')
+        prompt = GetIndex(action, 'prompt', 'action')
         tool = GetIndex(action, 'tool', 'action')
         args = GetIndex(action, 'args', 'action')
-        extname = GetIndexOrNone(action, 'extname')
+        extname = GetIndexOrNone(action, 'extension')
         stdout, stderr = None, None
         if extname:
-            stream = GetIndex(action, 'stream', 'action')
+            stream = GetIndex(action, 'source', 'action')
             if stream == 'stdout':
                 stdout = proc.PIPE
             if stream == 'stderr':
@@ -244,10 +396,12 @@ class ClangToolActionControl:
             if not stdout and not stderr:
                 raise SyntaxError('Invalid value for index "stream" in action')
         return ClangToolActionControl(
-                title, tool, args, extname, stdout, stderr)
+                prompt, tool, args, extname, stdout, stderr)
 
     def getOutputName(self, outdir, ccdb):
         assert os.path.isabs(ccdb.file), "'file' in cdb unit is not abspath"
+        if os.path.exists(ccdb.file):
+            return ccdb.file + self.extname
         return outdir + ccdb.file + self.extname
 
 
@@ -259,11 +413,11 @@ def ParsePlugins(plugins):
             plugobj = json.load(open(p))
             actionTy = GetIndex(plugobj, 'type')
             action = GetIndex(plugobj, 'action')
-            if actionTy == 'CompilerAction':
+            if actionTy == 'Integrated':
                 ret.append((CompilerAction,
                     CompilerActionControl.CreateFromPluginAction(action)))
                 continue
-            if actionTy == 'ClangToolAction':
+            if actionTy == 'Singleton':
                 ret.append((ClangToolAction,
                     ClangToolActionControl.CreateFromPluginAction(action)))
                 continue
@@ -354,7 +508,7 @@ def ParseArguments(argv): # {{{
             help='Generate source file list.')
 
     Parser.add_argument(
-            '--analyze', type=str, dest='analyze', choices=['ctu', 'no-ctu'],
+            '--analyze', action='store_true', dest='analyze',
             help='Execute Clang Static Analyzer.')
     Parser.add_argument(
             '--plugin', type=str, nargs='*', help='External tools to be executed.')
@@ -402,14 +556,16 @@ def ParseArguments(argv): # {{{
             help='Execute actions for files on the list.')
 
     Parser.add_argument(
-            '--print-execution-time', action='store_true', dest='print_time',
-            help='Print total execution time.')
+            '--scheduler-strategy', dest='scheduler', default='ljf',
+            choices=['fifo', 'ljf', 'sjf'],
+            help='Strategy of scheduling jobs.')
+    Parser.add_argument(
+            '--measure-job-size-with', dest='filesize', default='semicolon',
+            choices=['loc', 'semicolon', 'comma'],
+            help='Way of computing job size.')
 
     opts = Parser.parse_args(argv[1:])
     opts.output = os.path.abspath(opts.output)
-
-    if opts.print_time:
-        PrintExcutionInfo.print_time = True
 
     if opts.genodp:
         opts.genefm = True
@@ -448,29 +604,47 @@ def ParseArguments(argv): # {{{
     # If ctu analysis is enabled, but required files are not generated, add
     # them. Note: invocation list is always required no matter odp or laf mode
     # is prepared.
-    if opts.analyze == 'ctu':
-        if not os.path.isfile(os.path.join(opts.output, opts.efm)):
-            opts.genefm = True
-        if not os.path.isfile(os.path.join(opts.output, opts.ivcl)):
-            opts.genivcl = True
+    # NOTE: ctu analysis disabled for the tool demo version.
+
+    if opts.scheduler == 'fifo':
+        mp.Manager().register('SelectedWorkList', NormalQueue)
+    elif opts.scheduler == 'ljf':
+        SortedWorklist.order = LongestJobFirstWorklistOrder
+        mp.Manager().register('SelectedWorkList', SortedWorklist)
+    elif opts.scheduler == 'sjf':
+        SortedWorklist.order = ShortestJobFirstWorklistOrder
+        mp.Manager().register('SelectedWorkList', SortedWorklist)
+
+    if opts.filesize == 'loc':
+        mp.Manager().register('SelectedJobSize', LinesOfCodeAsJobSize)
+    elif opts.filesize == 'semicolon':
+        mp.Manager().register('SelectedJobSize', SemicolonAsJobSize)
+    elif opts.filesize == 'comma':
+        mp.Manager().register('SelectedJobSize', CommaAsJobSize)
+    SortedWorklist.jobsize = mp.Manager().SelectedJobSize()
 
     return opts
 # }}}
 
 
 def CompilerAction(opts, ccdb, action):
-    compiler = {'c': opts.cc, 'c++': opts.cxx}
-    arguments = [compiler[ccdb.language]] + ccdb.arguments + action.args
+    assert ccdb.language != 'Unknown', 'unknown language?'
+    compiler = action.getCompiler(ccdb)
+    if compiler == ccdb.language:
+        compiler = {'c': opts.cc, 'c++': opts.cxx}[ccdb.language]
+    arguments = [compiler] + ccdb.arguments
+    for i in action.args:
+        arguments.append(i.replace('/path/to/output', opts.output))
 
     if action.hasOutput:
         output = action.getOutputName(opts.output, ccdb)
-        print('%s: %s' % (action.title, output))
+        print('%s: %s' % (action.prompt, output))
         arguments += [action.outopt, output]
 
         # Create directory for output file.
         mkdir(os.path.dirname(output))
     else:
-        print('%s for %s' % (action.title, ccdb.file))
+        print('%s for %s' % (action.prompt, ccdb.file))
 
     # Execute action commands.
     log('!: ' + json.dumps(arguments))
@@ -505,7 +679,8 @@ ClangStaticAnalyzerAction = CompilerActionControl(
 
 
 def ClangToolAction(opts, ccdb, action):
-    print('%s for %s' % (action.title, ccdb.file))
+    assert ccdb.language != 'Unknown', 'unknown language?'
+    print('%s for %s' % (action.prompt, ccdb.file))
     actionargs = []
     for i in action.args:
         actionargs.append(i.replace('/path/to/output', opts.output))
@@ -544,6 +719,11 @@ def GenerateFinalExternalFunctionMap(opts, cdb):
     output = os.path.join(opts.output, opts.efm)
     print('Generating global external function map: ' + output)
     efm = {}
+    # print('*' * 80)
+    # print([ClangExtDefMappingAction.getOutputName(opts.output, i) for i in cdb])
+    # print('*' * 80)
+    # exit(0)
+
     with mp.Pool(opts.jobs) as p:
         for efmcontent in p.map(getExtDefMap,
                 [ClangExtDefMappingAction.getOutputName(opts.output, i) \
@@ -635,21 +815,26 @@ def PostArgumentParsingInitializations(opts):
         ClangStaticAnalyzerAction.args += [
                 '-Xanalyzer', '-analyzer-display-progress'
                 ]
-    if opts.analyze == 'ctu':
-        ctuConfigs = [
-                'experimental-enable-naive-ctu-analysis=true',
-                'ctu-dir=' + opts.output,
-                'ctu-index-name=' + opts.efm,
-                'ctu-invocation-list=' + os.path.join(opts.output, opts.ivcl),
-                ]
-        if opts.verbose:
-            ctuConfigs.append('display-ctu-progress=true')
-        ClangStaticAnalyzerAction.args += [
-                '-Xanalyzer', '-analyzer-config', '-Xanalyzer',
-                ','.join(ctuConfigs),
-                ]
+    # NOTE: ctu analysis disabled for the tool demo version.
     # Set clang-extdef-mapping tool.
     ClangExtDefMappingAction.tool = opts.efmer
+
+    # Dump summaries of all actions.
+    if not opts.verbose:
+        return
+    log(SyntaxOnlyAction.summarize())
+    log(CompilationAction.summarize())
+    log(PreprocessAction.summarize())
+    log(GenerateASTAction.summarize())
+    log(GenerateBitcodeAction.summarize())
+    log(GenerateLLVMIRAction.summarize())
+    log(GenerateAssemblyAction.summarize())
+    log(GenerateDependencyAction.summarize())
+    log(ClangStaticAnalyzerAction.summarize())
+    log(ClangExtDefMappingAction.summarize())
+    if opts.plugin:
+        for p in opts.plugin:
+            log(p[1].summarize())
 
 
 def CreateCompilationDatabaseObjectAction(opts, pool):
@@ -658,6 +843,10 @@ def CreateCompilationDatabaseObjectAction(opts, pool):
         if opts.files and ccdb.file not in opts.files:
             log('Skip file "%s"' % ccdb.file)
             return ccdb
+        if ccdb.language == 'Unknown':
+            warn('Skip file "%s" for unsupported language type' % ccdb.file)
+            return ccdb
+
         if opts.syntax:
             pool.addTask(CompilerAction, opts, ccdb, SyntaxOnlyAction)
         if opts.genobj:
@@ -678,7 +867,7 @@ def CreateCompilationDatabaseObjectAction(opts, pool):
             pool.addTask(ClangToolAction, opts, ccdb, ClangExtDefMappingAction)
         # As no-ctu analysis is single file operation, they can be executed
         # together with other compiler and clang tooling actions.
-        if opts.analyze == 'no-ctu':
+        if opts.analyze:
             pool.addTask(CompilerAction, opts, ccdb, ClangStaticAnalyzerAction)
         # Add plugin actions.
         if opts.plugin:
@@ -702,23 +891,22 @@ def ExecuteFullCompilationDatabaseAction(opts, cdb):
         GenerateSourceFileListAction(opts, cdb)
     # For ctu analysis, execute analyzer after all required files are
     # generated.
-    if opts.analyze == 'ctu':
-        pool = TaskPool(opts.jobs)
-        for ccdb in cdb:
-            pool.addTask(CompilerAction, opts, ccdb, ClangStaticAnalyzerAction)
-        pool.join()
+    # NOTE: ctu analysis disabled for the tool demo version.
 
 
 def main(argv):
     opts = ParseArguments(argv)
     PostArgumentParsingInitializations(opts)
-    pool = TaskPool(opts.jobs)
+    PrintExcutionInfo.start_time = time.time()
+    pool = TaskPool(opts)
     action = CreateCompilationDatabaseObjectAction(opts, pool)
+    # cdb: compilation database.
     with open(opts.cdb) as fcdb:
         cdb = json.load(fcdb, object_hook=action)
     AddCompilationDatabaseActions(opts, pool, cdb)
     pool.join()
     ExecuteFullCompilationDatabaseAction(opts, cdb)
+    PrintExcutionInfo()
 
 
 if __name__ == '__main__':
