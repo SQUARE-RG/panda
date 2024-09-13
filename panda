@@ -206,6 +206,10 @@ class WorklistOrder:
 # - Decending order of size: the larger the less
 class LongestJobFirstWorklistOrder(WorklistOrder):
     def itemlt(self, other):
+        # assume None it is the largest.
+        if self.size is None: return True
+        elif other.size is None: return False
+        
         return self.size > other.size
 
 # Shortest job first order:
@@ -213,6 +217,9 @@ class LongestJobFirstWorklistOrder(WorklistOrder):
 # - Decending order of size: the less the less
 class ShortestJobFirstWorklistOrder(WorklistOrder):
     def itemlt(self, other):
+        # assume None it is the largest.
+        if self.size is None: return False
+        elif other.size is None: return True
         return self.size < other.size
 
 
