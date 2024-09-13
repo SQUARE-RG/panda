@@ -378,6 +378,8 @@ class CompilerActionControl:
 
     def getOutputName(self, outdir, ccdb):
         assert os.path.isabs(ccdb.file), "'file' in cdb unit is not abspath"
+        if os.path.exists(ccdb.file):
+            return ccdb.file + self.getOutputExtensionName(ccdb.language)
         return outdir + ccdb.file + self.getOutputExtensionName(ccdb.language)
 
     def getCompiler(self, ccdb):
@@ -426,6 +428,8 @@ class ClangToolActionControl:
 
     def getOutputName(self, outdir, ccdb):
         assert os.path.isabs(ccdb.file), "'file' in cdb unit is not abspath"
+        if os.path.exists(ccdb.file):
+            return ccdb.file + self.extname
         return outdir + ccdb.file + self.extname
 
 
