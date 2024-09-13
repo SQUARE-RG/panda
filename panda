@@ -206,10 +206,6 @@ class WorklistOrder:
 # - Decending order of size: the larger the less
 class LongestJobFirstWorklistOrder(WorklistOrder):
     def itemlt(self, other):
-        # assume None it is the largest.
-        if self.size is None: return True
-        elif other.size is None: return False
-        
         return self.size > other.size
 
 # Shortest job first order:
@@ -217,10 +213,6 @@ class LongestJobFirstWorklistOrder(WorklistOrder):
 # - Decending order of size: the less the less
 class ShortestJobFirstWorklistOrder(WorklistOrder):
     def itemlt(self, other):
-        # assume None it is the largest.
-        if self.size is None: return False
-        elif other.size is None: return True
-        
         return self.size < other.size
 
 
@@ -350,8 +342,6 @@ class CompilerActionControl:
 
     def getOutputName(self, outdir, ccdb):
         assert os.path.isabs(ccdb.file), "'file' in cdb unit is not abspath"
-        if os.path.exists(ccdb.file):
-            return ccdb.file + self.getOutputExtensionName(ccdb.language)
         return outdir + ccdb.file + self.getOutputExtensionName(ccdb.language)
 
     def getCompiler(self, ccdb):
@@ -400,8 +390,6 @@ class ClangToolActionControl:
 
     def getOutputName(self, outdir, ccdb):
         assert os.path.isabs(ccdb.file), "'file' in cdb unit is not abspath"
-        if os.path.exists(ccdb.file):
-            return ccdb.file + self.extname
         return outdir + ccdb.file + self.extname
 
 
@@ -719,11 +707,6 @@ def GenerateFinalExternalFunctionMap(opts, cdb):
     output = os.path.join(opts.output, opts.efm)
     print('Generating global external function map: ' + output)
     efm = {}
-    # print('*' * 80)
-    # print([ClangExtDefMappingAction.getOutputName(opts.output, i) for i in cdb])
-    # print('*' * 80)
-    # exit(0)
-
     with mp.Pool(opts.jobs) as p:
         for efmcontent in p.map(getExtDefMap,
                 [ClangExtDefMappingAction.getOutputName(opts.output, i) \
@@ -900,7 +883,6 @@ def main(argv):
     PrintExcutionInfo.start_time = time.time()
     pool = TaskPool(opts)
     action = CreateCompilationDatabaseObjectAction(opts, pool)
-    # cdb: compilation database.
     with open(opts.cdb) as fcdb:
         cdb = json.load(fcdb, object_hook=action)
     AddCompilationDatabaseActions(opts, pool, cdb)
