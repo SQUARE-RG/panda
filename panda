@@ -241,41 +241,12 @@ class SortedWorklist(PriorityQueue):
         except Exception as e:
             traceback.print_exc()
 
-class LogManager:
-    def __init__(self, output):
-        self.output = output
-        self.hintlist = mp.Manager().list()
-
-    def hint(self, item, duration):
-        duration *= 1000
-        self.hintlist.append((item, duration))
-
-    def dump(self):
-        if not self.output: return
-        with open(os.path.join(self.output, 'predictions.log'), 'w') as f:
-            f.write('<file> <size> <execution>\n')
-            for item, duration in list(self.hintlist):
-                opts, cdb, action = \
-                        (lambda o, c, a=None: (o, c, a))(*item.getArgs())
-                # Ignore cdb jobs.
-                if not action: continue
-                size = item.size if hasattr(item, 'size') else 0
-                f.write('%s %lf %lf\n' % (cdb.file, size, duration))
-
-
 # NOTE: THINK AGAIN BEFORE MODIFYING THE IMPLEMENTATION OF STOPPING.
 class TaskPool:
     def __init__(self, opts):
         assert opts.jobs > 0, 'Invalid pool size.'
-        logdirformat = '-'.join([
-            'logs', opts.scheduler, opts.filesize, '%y%m%d%H%M%S'])
-        stamp = time.strftime(logdirformat, time.localtime())
-        self.output = os.path.join(opts.output, stamp)
-        mkdir(self.output)
         self.procs = []
         self.tasks = mp.Manager().SelectedWorkList()
-        self.taskarrive = []
-        self.logManager = LogManager(self.output)
         for i in range(opts.jobs):
             proc = mp.Process(target=self._run_task)
             proc.daemon = True
@@ -285,7 +256,6 @@ class TaskPool:
 
     def addTask(self, *args):
         self.tasks.put(WorklistItem(*args))
-        self.taskarrive.append(time.time())
 
     def join(self):
         for i in self.procs:
@@ -293,28 +263,12 @@ class TaskPool:
         for i in self.procs:
             i.join()
             log('Task process %d joins.' % i.pid)
-        if self.output:
-            with open(os.path.join(self.output, 'task-arrive.log'), 'w') as f:
-                for i in self.taskarrive:
-                    f.write('%lf\n' % i)
 
     def _run_task(self):
-        durations = [(0.0, time.time())]
         while True:
             job = self.tasks.get()
-            begin = time.time()
             if not job.run():
                 break
-            end = time.time()
-            durations.append((begin, end))
-            self.logManager.hint(job, end - begin)
-        durations.append((time.time(), 0.0))
-        if self.output:
-            name = 'taskprocess-%d.log' % os.getpid()
-            with open(os.path.join(self.output, name), 'w') as f:
-                for i in durations:
-                    f.write('%lf %lf\n' % (i[0], i[1]))
-
 
 def GetIndex(container, index, root='<root>'):
     if index not in container:
@@ -925,7 +879,6 @@ def main(argv):
     pool.join()
     ExecuteFullCompilationDatabaseAction(opts, cdb)
     PrintExcutionInfo()
-    pool.logManager.dump()
 
 
 if __name__ == '__main__':
