@@ -180,61 +180,18 @@ the output of which stream will be stored to the output file.
 Please note that, string `/path/to/output` will be always be replaced to
 the actual output path determined with option `-o` during execution.
 
-## Data Presentation and Open-Access
+## Publications
 
-The Gantt Chart in Figure 6 can be generated with the `analyze-log` script.
-And all data in the experiments are available from the Google Spreadsheet below.
-
-### Print Execution Summary and Draw Gantt Chart
-
-For Tool Demo paper revision,
-execution logs are dumped to the output path in the format of
-
-```
-/path/to/output/logs-<strategy>-<key>-<timestamp>
-```
-
-where `<strategy>` refers to the sorting strategies mentioned in Section 2.4
-that `fifo` for *First-Come-First-Service*, and `ljf` for *Longest-Processing-Time-First*.
-And `<key>` represent the key of sorting the worklist.
-As mentioned in Section 2.3, the number of semicolons (`semicolon`) is used by default,
-whereas the number of code lines (`loc`) is also available for alternative.
-
-To summarize a previous execution and present the Gantt Chart of all workers,
-please use the `analyze-log` script provided only in this branch.
-
-```
-$ analyze-log /path/to/output/logs-<strategy>-<key>-<timestamp>
-```
-
-The `analyze-log` requires [Matplotlib][link-matplotlib] to generate the Gantt Chart.
-If the Python interpreter fails to import this module,
-the `analyze-log` script will **NOT** report an error and exit.
-
-An example Gantt Chart can be found from Figure 6 in the paper.
-
-### Selection of Key to Sort the Worklist
-
-We select the key to sort the worklist with Pearson Correlation Coefficient.
-The detailed data of calculating the data is presented in the Google Spreadsheet below.
-
-<iframe src="https://docs.google.com/spreadsheets/d/e/2PACX-1vSf--XAfkfdPwY3p5K6QCjv-_yKoKUaV4tQcu9AiBvuOebHcZ8vuVsrGLuWseS4xQWZy3krDmX3PTlz/pubhtml?widget=true&amp;headers=false" width="800" height="600"></iframe>
-
-It may take a while to load the data.
-Please follow the above link or go to the [homepage][link-homepage] of *Panda* if the preview is not available.
-
-### Detailed Data of Evaluation
-
-The detailed data of the evaluation in Section 3 is presented in the Google Spreadsheet below.
-
-<iframe src="https://docs.google.com/spreadsheets/d/e/2PACX-1vSseVVN-KKsLK3f6aHm2KWOZnEJkJ4s-S5rniYDk5lOPcZaDQBEqMCxwIv7T_NK2j_0AbuF4qRinPpw/pubhtml?widget=true&amp;headers=false" width="800" height="600"></iframe>
-
-It may take a while to load the data.
-Please follow the above link or go to the [homepage][link-homepage] of *Panda* if the preview is not available.
+* Ma, Xutong, Jiwei Yan, Jun Yan, and Jian Zhang.
+    "Panda: A Concurrent Scheduler for Compiler-Based Tools."
+    In Proceedings of the 33rd ACM SIGSOFT International Symposium
+    on Software Testing and Analysis, pp. 1871-1875. 2024.
+    <https://doi.org/10.1145/3650212.3685311>
 
 ## Acknowledgments
 
 * REST team, Institute of Software, Chinese Academy of Sciences
+* Anonymous reviewers of the [*ISSTA* 2024 conference][link-issta] reviewing this paper
 * The tool name, *Panda*, is inspired by the animated sitcom *We Bare Bears*
     and the compiler argument recorder [Bear (Build EAR)][link-bear].
 
@@ -245,5 +202,4 @@ Let me know if *Panda* helps you. Thanks.
 [link-cdb]: https://clang.llvm.org/docs/JSONCompilationDatabase.html
 [link-al]: https://clang.llvm.org/docs/analyzer/user-docs/CrossTranslationUnit.html#manual-ctu-analysis
 [link-odp]: https://clang.llvm.org/docs/analyzer/user-docs/CrossTranslationUnit.html#id2
-[link-matplotlib]: https://matplotlib.org
-[link-homepage]: https://lcs.ios.ac.cn/~maxt/Panda/#selection-of-key-to-sort-the-worklist
+[link-issta]: https://2024.issta.org/track/issta-ecoop-2024-tool-demonstrations#Call-For-Papers
