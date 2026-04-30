@@ -547,7 +547,7 @@ def ParseArguments(argv): # {{{
             help='Execute actions for files on the list.')
 
     Parser.add_argument(
-            '--scheduler-strategy', dest='scheduler', default='ljf',
+            '--scheduler-strategy', dest='scheduler', default='fifo',
             choices=['fifo', 'ljf', 'sjf'],
             help='Strategy of scheduling jobs.')
     Parser.add_argument(
