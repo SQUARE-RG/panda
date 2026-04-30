@@ -113,7 +113,7 @@ class CompileCommands:
 
         # Adjust arguments.
         i, n = 0, len(arguments)
-        self.arguments = []
+        self.arguments = ['-Wno-error']
         prune1 = {'-c', '-fsyntax-only', '-save-temps'}
         prune2 = {'-o', '-MF', '-MT', '-MQ', '-MJ'}
         prunes2 = {'-M', '-W', '-g'}
