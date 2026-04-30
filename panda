@@ -281,7 +281,7 @@ class TaskPool:
                 if not job.run():
                     break
             except Exception as e:
-                print(e)
+                traceback.print_exc()
 
 def GetIndex(container, index, root='<root>'):
     if index not in container:
