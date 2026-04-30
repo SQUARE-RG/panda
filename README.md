@@ -113,6 +113,8 @@ mainly generate inputs in desired formats for different analyzers.
     invoke compiler with `-S`
 * Generate dependency description dump (`-D` or `--gen-dep`):
     invoke compiler with `-M`
+* Generate header inclusion and depth dump (`-H` or `--gen-inc`):
+    invoke compiler with `-H`
 * Execute Clang Static Analyzer without Cross Translation Unit Analysis (`--analysis`)
 
 ### Built-in Singleton Tool Configurations

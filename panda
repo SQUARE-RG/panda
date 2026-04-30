@@ -483,6 +483,9 @@ def ParseArguments(argv): # {{{
             '-D', '--gen-dep', action='store_true', dest='gendep',
             help='Generate dependency description.')
     Parser.add_argument(
+            '-H', '--gen-inc', action='store_true', dest='geninc',
+            help='Generate header inclusion and depth.')
+    Parser.add_argument(
             '-M', '--gen-extdef-mapping', action='store_true', dest='genefm',
             help='Generate the external function map.')
     Parser.add_argument(
@@ -687,6 +690,9 @@ GenerateAssemblyAction = CompilerActionControl(
         'Generating assembly dump file', ['-S', '-w'], '.s')
 GenerateDependencyAction = CompilerActionControl(
         'Generating dependency file', ['-fsyntax-only', '-w', '-M'], '.d', '-MF')
+GenerateHeaderInclusionAction = CompilerActionControl(
+        'Generating header inclusion and depth',
+        ['-fsyntax-only', '-w', '-H'], '.inc', '<stderr>')
 # For analyzer, reset output and ctu arguments in self.args with opts.output.
 # Checkers in package deadcode are disabled by default, as they usually
 # generate only useless reports.
@@ -830,6 +836,7 @@ def PostArgumentParsingInitializations(opts):
     log(GenerateLLVMIRAction.summarize())
     log(GenerateAssemblyAction.summarize())
     log(GenerateDependencyAction.summarize())
+    log(GenerateHeaderInclusionAction.summarize())
     log(ClangStaticAnalyzerAction.summarize())
     log(ClangExtDefMappingAction.summarize())
     if opts.plugin:
@@ -863,6 +870,9 @@ def CreateCompilationDatabaseObjectAction(opts, pool):
             pool.addTask(CompilerAction, opts, ccdb, GenerateAssemblyAction)
         if opts.gendep:
             pool.addTask(CompilerAction, opts, ccdb, GenerateDependencyAction)
+        if opts.geninc:
+            pool.addTask(CompilerAction, opts, ccdb,
+                    GenerateHeaderInclusionAction)
         if opts.genefm or opts.genefmast:
             pool.addTask(ClangToolAction, opts, ccdb, ClangExtDefMappingAction)
         # As no-ctu analysis is single file operation, they can be executed
