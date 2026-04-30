@@ -44,22 +44,6 @@ def mkdir(dirname):
             pass
 
 
-# File type: clang::driver::types::lookupTypeForExtension
-def InferLanguage(path):
-    extname = os.path.splitext(path)[1][1:]
-    if extname == 'c':
-        return 'c'
-    elif extname in {'C', 'cc', 'CC', 'cp', 'cpp', 'CPP',
-            'cxx', 'CXX', 'c++', 'C++'}:
-        return 'c++'
-#   elif extname == 'i':
-#       return 'PP-C'
-#   elif extname == 'ii':
-#       return 'PP-C++'
-    else:
-        return 'Unknown'
-
-
 class CompileCommands:
     def __init__(self, ccmd=None):
         self.compiler = None
@@ -92,8 +76,6 @@ class CompileCommands:
         self.file = os.path.abspath(os.path.join(
             self.directory, ccmd['file']))
 
-        self.language = InferLanguage(self.file)
-
         # command => arguments
         arguments = None
         if 'command' in ccmd:
@@ -102,8 +84,32 @@ class CompileCommands:
         else:
             arguments = ccmd['arguments']
 
-        # compiler
+        # Filename and driver and language:
+        #
+        # |     | f.c | f.cpp |
+        # | gcc |  c  |  c++  |
+        # | g++ | c++ |  c++  |
+        #
+        # Option -x will always override the presettings above
+
+        # Start inferring language
+        self.language = 'Unknown'
+
+        # Language via extname: clang::driver::types::lookupTypeForExtension
+        # Tl;Dr: Only .c files are C files
+        extname = os.path.splitext(self.file)[1][1:]
+        if extname == 'c':
+            self.language = 'c'
+        elif extname in {'C', 'cc', 'CC', 'cp', 'cpp', 'CPP',
+                'cxx', 'CXX', 'c++', 'C++'}:
+            self.language = 'c++'
+
+        # Override lauguage via compiler
         self.compiler = arguments[0]
+        if self.compiler.endswith('g++') or \
+           self.compiler.endswith('c++') or \
+           self.compiler.endswith('cxx'):
+            self.language = 'c++'
 
         # Adjust arguments.
         i, n = 0, len(arguments)
@@ -130,6 +136,10 @@ class CompileCommands:
                 self.language = arguments[i + 1]
             elif arguments[i][:2] == '-x':
                 self.language = arguments[i][2:]
+
+        # Reset language to Unknown if not c/c++
+        if self.language != 'c' and self.language != 'c++':
+            self.language = 'Unknown'
 
         return self
 
