@@ -134,16 +134,17 @@ and object `action` defines the CBT Execution Configuration object.
 
 ```json
 {
-    "comment": "Example plugin for Panda scheduler.",
+    "comment": "Example plugin for gcc -H option.",
     "type": "Integrated",
     "action": {
-        "prompt": "Generating LLVM-IR code",
+        "prompt": "Dumping header inclusion and depth",
         "tool": {
-            "c": "clang",
-            "c++": "clang++"
+            "c": "gcc",
+            "c++": "g++"
         },
-        "args": ["-c", "-emit-llvm", "-S"],
-        "extension": ".ll"
+        "args": ["-H", "-fsyntax-only"],
+        "outopt": "<stderr>",
+        "extension": ".txt"
     }
 }
 ```
@@ -152,6 +153,11 @@ For a configuration for Integrated tools, object `action` has four fields.
 Field `prompt` defines the prompt string printed during executing the tool.
 Field `args` is a list of command line arguments to be added during execution.
 Field `extension` determines the extension name of the output file.
+Field `outopt` provides the command line option different from `-o`
+used to indicate output file (e.g., add `"outopt": "-M"` field
+to use the `-M` option of GCC and Clang to dump compilation dependencies),
+or `<stdout>`/`<stderr>` to capture the output of an output stream
+(as shown in the example above).
 
 * Example configuration (Figure 4b) of executing Clang Query
   to identify all `goto` statements,

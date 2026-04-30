@@ -618,6 +618,25 @@ def ParseArguments(argv): # {{{
 # }}}
 
 
+def writeStreamOutputToFile(process, output):
+    if output is None: return
+
+    outstream, content = None, None
+    if process.stdout is not None:
+        outstream = 'stdout'
+        content = process.stdout.read().decode('utf-8')
+    if process.stderr is not None:
+        outstream = 'stderr'
+        content = process.stderr.read().decode('utf-8')
+
+    if content is None: return
+
+    mkdir(os.path.dirname(output))
+    log('!: Write ' + outstream + ' output to file ' + output)
+    with open(output, 'w') as fout:
+        fout.write(content)
+
+
 def CompilerAction(opts, ccdb, action):
     assert ccdb.language != 'Unknown', 'unknown language?'
     compiler = action.getCompiler(ccdb)
@@ -627,10 +646,16 @@ def CompilerAction(opts, ccdb, action):
     for i in action.args:
         arguments.append(i.replace('/path/to/output', opts.output))
 
+    stdout, stderr, output = None, None, None
     if action.hasOutput:
         output = action.getOutputName(opts.output, ccdb)
         print('%s: %s' % (action.prompt, output))
-        arguments += [action.outopt, output]
+        if action.outopt == '<stdout>':
+            stdout = proc.PIPE
+        elif action.outopt == '<stderr>':
+            stderr = proc.PIPE
+        else:
+            arguments += [action.outopt, output]
 
         # Create directory for output file.
         mkdir(os.path.dirname(output))
@@ -639,7 +664,9 @@ def CompilerAction(opts, ccdb, action):
 
     # Execute action commands.
     log('!It: ' + json.dumps(arguments))
-    with proc.Popen(arguments, cwd=ccdb.directory) as p:
+    with proc.Popen(arguments, stdout=stdout, stderr=stderr,
+            cwd=ccdb.directory) as p:
+        writeStreamOutputToFile(p, output)
         ret = p.wait()
     return ret
 
@@ -678,27 +705,14 @@ def ClangToolAction(opts, ccdb, action):
     arguments = [action.tool, ccdb.file] + actionargs + ['--', '-w'] + \
              ccdb.arguments
     log('!Sg: ' + json.dumps(arguments))
-    content = None
-    outstream = None
     with proc.Popen(arguments, stdout=action.stdout, stderr=action.stderr,
             cwd=ccdb.directory) as p:
-        if action.stdout:
-            outstream = 'stdout'
-            content = p.stdout.read().decode('utf-8')
-        if action.stderr:
-            outstream = 'stderr'
-            content = p.stderr.read().decode('utf-8')
+        writeStreamOutputToFile(p, action.getOutputName(opts.output, ccdb))
         ret = p.wait()
-    if content is not None:
-        output = action.getOutputName(opts.output, ccdb)
-        log('!: Write ' + outstream + ' output to file ' + output)
-        mkdir(os.path.dirname(output))
-        with open(output, 'w') as fout:
-            fout.write(content)
     return ret
 
 
-# Initialize tool names after argument parsing in function 
+# Initialize tool names after argument parsing in function
 # PostArgumentParsingInitializations.
 ClangExtDefMappingAction = ClangToolActionControl(
         'Generating raw external function map', Default.ExtDefMapper, [],
