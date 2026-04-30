@@ -638,7 +638,7 @@ def CompilerAction(opts, ccdb, action):
         print('%s for %s' % (action.prompt, ccdb.file))
 
     # Execute action commands.
-    log('!: ' + json.dumps(arguments))
+    log('!It: ' + json.dumps(arguments))
     with proc.Popen(arguments, cwd=ccdb.directory) as p:
         ret = p.wait()
     return ret
@@ -677,7 +677,7 @@ def ClangToolAction(opts, ccdb, action):
         actionargs.append(i.replace('/path/to/output', opts.output))
     arguments = [action.tool, ccdb.file] + actionargs + ['--', '-w'] + \
              ccdb.arguments
-    log('!: ' + json.dumps(arguments))
+    log('!Sg: ' + json.dumps(arguments))
     content = None
     outstream = None
     with proc.Popen(arguments, stdout=action.stdout, stderr=action.stderr,
