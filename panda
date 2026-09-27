@@ -776,17 +776,20 @@ def GenerateInvocationListAction(opts, cdb):
 
 def GenerateSourceFileListActionCollect(argv):
     (ccdb, depfile) = argv
-    ret = set()
+
     if not os.path.isfile(depfile):
-        warn('Rerun with -D to generate dependency file ' + depfile)
-        return ret
-    for i in open(depfile).read().split():
-        if not i or i == '\\' or i[-1] == ':':
-            continue
-        name = os.path.abspath(os.path.join(ccdb.directory, i))
-        if os.path.isfile(name):
-            ret.add(name)
-    return ret
+        warn(f'Missing dependency file {depfile}')
+        return set()
+
+    name, deps = open(depfile).read().split(':', 1)
+    makefile = depfile + '.list:' + deps + '\t@realpath $^ | sort -u'
+    with proc.Popen(['make', '-f', '-'], text=True,
+                    stdin=proc.PIPE, stdout=proc.PIPE, stderr=proc.PIPE) as p:
+        stdout, stderr = p.communicate(makefile)
+        assert not stderr, f"make error: {depfile}\n{stderr}"
+        p.wait()
+
+    return set(stdout.splitlines())
 
 def GenerateSourceFileListAction(opts, cdb):
     output = os.path.join(opts.output, opts.sfl)
