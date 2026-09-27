@@ -725,7 +725,11 @@ ClangExtDefMappingAction = ClangToolActionControl(
         '.extdef', proc.PIPE)
 
 
-def getExtDefMap(efmfile): return open(efmfile).read()
+def getExtDefMap(efmfile):
+    try:
+        return open(efmfile).read()
+    except FileNotFoundError:
+        return ''
 def GenerateFinalExternalFunctionMap(opts, cdb):
     output = os.path.join(opts.output, opts.efm)
     print('Generating global external function map: ' + output)
